@@ -1,16 +1,41 @@
-from flask import Flask, render_template, request, redirect, jsonify, url_for, flash
+from flask import (
+    Flask, render_template, request, redirect, jsonify, url_for, flash,
+    session as login_session, make_response)
 
 from sqlalchemy import create_engine, asc
 from sqlalchemy.orm import sessionmaker
-from database_setup import Base, Restaurant, MenuItem
 
-from flask import session as login_session
-import random, string
-
-from oauth2client.client import flow_from_clientsecrets, FlowExchangeError
+import random
+import string
 import json
-from flask import make_response
 import requests
+from oauth2client.client import flow_from_clientsecrets, FlowExchangeError
+
+from database_setup import Base, Restaurant, MenuItem, User
+
+
+def getUserId(email):
+    try:
+        user = session.query(User).filter_by(email=email).one()
+        return user.id
+    except:
+        return None
+
+
+def createUser(d):
+    'd = login_session'
+    user = User(name=d['username'],
+                email=d['email'],
+                picture=d['picture'])
+    session.add(user)
+    session.commit()
+    # user = session.query(User).filter_by(email=d['email']).one()
+    # return user.id
+    return getUserId(d['email'])
+
+
+def getUser(id_):
+    return session.query(User).filter_by(id=id_).one()
 
 app = Flask(__name__)
 
@@ -107,7 +132,15 @@ def gconnect():
     login_session['username'] = data['name']
     login_session['email'] = data['email']
     login_session['picture'] = data['picture']
+
     print2('email: %s', data['email'])
+
+    # check DB
+    user_id = getUserId(login_session['email'])
+    if not user_id:
+        user_id = createUser(login_session)
+    login_session['user_id'] = user_id
+    print2('user created: %s', user_id)
 
     output = '''\
 <h2>Welcome, %s!</h2>
@@ -168,7 +201,8 @@ def newRestaurant():
   if 'access_token' not in login_session:
       return redirect('/login')
   if request.method == 'POST':
-      newR = Restaurant(name = request.form['name'])
+      newR = Restaurant(name=request.form['name'],
+                        user_id=login_session['user_id'])
       session.add(newR)
       flash('New Restaurant %s Successfully Created' % newR.name)
       session.commit()
@@ -218,17 +252,22 @@ def showMenu(restaurant_id):
 #Create a new menu item
 @app.route('/restaurant/<int:restaurant_id>/menu/new/',methods=['GET','POST'])
 def newMenuItem(restaurant_id):
-  if 'access_token' not in login_session:
-      return redirect('/login')
-  restaurant = session.query(Restaurant).filter_by(id = restaurant_id).one()
-  if request.method == 'POST':
-      newItem = MenuItem(name = request.form['name'], description = request.form['description'], price = request.form['price'], course = request.form['course'], restaurant_id = restaurant_id)
-      session.add(newItem)
-      session.commit()
-      flash('New Menu %s Item Successfully Created' % (newItem.name))
-      return redirect(url_for('showMenu', restaurant_id = restaurant_id))
-  else:
-      return render_template('newmenuitem.html', restaurant_id = restaurant_id)
+    if 'access_token' not in login_session:
+        return redirect('/login')
+    restaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
+    if request.method == 'POST':
+        newItem = MenuItem(name=request.form['name'],
+                           description=request.form['description'],
+                           price=request.form['price'],
+                           course=request.form['course'],
+                           restaurant_id=restaurant_id,
+                           user_id=restaurant.user_id)
+        session.add(newItem)
+        session.commit()
+        flash('New Menu %s Item Successfully Created' % (newItem.name))
+        return redirect(url_for('showMenu', restaurant_id = restaurant_id))
+    else:
+        return render_template('newmenuitem.html', restaurant_id = restaurant_id)
 
 #Edit a menu item
 @app.route('/restaurant/<int:restaurant_id>/menu/<int:menu_id>/edit', methods=['GET','POST'])
