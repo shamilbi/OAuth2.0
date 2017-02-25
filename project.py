@@ -1,10 +1,27 @@
-from flask import Flask, render_template, request, redirect,jsonify, url_for, flash
-app = Flask(__name__)
+from flask import Flask, render_template, request, redirect, jsonify, url_for, flash
 
 from sqlalchemy import create_engine, asc
 from sqlalchemy.orm import sessionmaker
 from database_setup import Base, Restaurant, MenuItem
 
+from flask import session as login_session
+import random, string
+
+from oauth2client.client import flow_from_clientsecrets, FlowExchangeError
+import json
+from flask import make_response
+import requests
+
+app = Flask(__name__)
+
+CLIENT_SECRETS = 'client_secrets.json'
+
+def _load_client_id():
+    with open(CLIENT_SECRETS, 'r') as fp:
+        return json.loads(fp.read())['web']['client_id']
+
+CLIENT_ID = _load_client_id()
+del _load_client_id
 
 #Connect to Database and create database session
 engine = create_engine('sqlite:///restaurantmenu.db')
@@ -12,6 +29,88 @@ Base.metadata.bind = engine
 
 DBSession = sessionmaker(bind=engine)
 session = DBSession()
+
+@app.route('/login')
+def showLogin():
+    choices = string.ascii_uppercase + string.digits
+    state = ''.join(random.choice(choices) for _ in range(32))
+    login_session['state'] = state
+    #return 'The current session state is %s' % state
+    print('render login.html ...')
+    return render_template('login.html')
+
+
+def print2(s, *args):
+    if not args:
+        print(s)
+    else:
+        print(s % args)
+
+
+@app.route('/gconnect', methods=['POST'])
+def gconnect():
+    def _mk_response(s, code):
+        r = make_response(s, code)
+        r.headers['Content-Type'] = 'text/html; charset=utf-8'
+        return r
+
+    def _url_get(url, **params):
+        answer = requests.get(url, params=params)
+        return json.loads(answer.text)
+
+    print('gconnect ...')
+    state1 = request.args.get('state')
+    if state1 != login_session['state']:
+        print2('bad state: %s ...', state1)
+        return _mk_response('Invalid state parameter', 401)
+
+    print('oauth flow ...')
+    code = request.data
+    try:
+        oauth_flow = flow_from_clientsecrets(CLIENT_SECRETS, scope='')
+        oauth_flow.redirect_uri = 'postmessage'
+        credentials = oauth_flow.step2_exchange(code)
+    except FlowExchangeError:
+        return _mk_response('Failed to upgrade the authorization code', 401)
+
+    print('tokeninfo ...')
+    result = _url_get('https://www.googleapis.com/oauth2/v1/tokeninfo',
+                       access_token=credentials.access_token)
+
+    error = result.get('error')
+    print2('tokeninfo OK, error: %s', error)
+    if error is not None:
+        return _mk_response(error, 500)
+    gplus_id = credentials.id_token['sub']
+    print2('gplus_id: %s', gplus_id)
+    if result['user_id'] != gplus_id:
+        return _mk_response('Bad user_id', 401)
+    if result['issued_to'] != CLIENT_ID:
+        return _mk_response('Bad issued_to', 401)
+    #stored_credentials = login_session.get('credentials')
+    stored_gplus_id = login_session.get('gplus_id')
+    #if stored_credentials is not None and gplus_id == stored_gplus_id:
+    if stored_gplus_id and gplus_id == stored_gplus_id:
+        return _mk_response('Current user is already connected', 200)
+    #login_session['credentials'] = credentials
+    login_session['gplus_id'] = gplus_id
+
+    print('userinfo ...')
+    data = _url_get('https://www.googleapis.com/oauth2/v1/userinfo',
+                    access_token=credentials.access_token)
+
+    login_session['username'] = data['name']
+    login_session['picture'] = data['picture']
+    login_session['email'] = data['email']
+    print2('email: %s', data['email'])
+
+    output = '''\
+<h2>Welcome, %s!</h2>
+<img src="%s" style="width: 300px; height: 300px; border-radius: 150px;"/>
+''' % (login_session['username'], login_session['picture'])
+    print('gconnect: before return ...')
+    return _mk_response(output, 200)
+
 
 
 #JSON APIs to view Restaurant Information
