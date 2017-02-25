@@ -47,17 +47,19 @@ def print2(s, *args):
         print(s % args)
 
 
+def _mk_response(s, code):
+    r = make_response(s, code)
+    r.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return r
+
+
+def _url_get(url, **params):
+    answer = requests.get(url, params=params)
+    return json.loads(answer.text)
+
+
 @app.route('/gconnect', methods=['POST'])
 def gconnect():
-    def _mk_response(s, code):
-        r = make_response(s, code)
-        r.headers['Content-Type'] = 'text/html; charset=utf-8'
-        return r
-
-    def _url_get(url, **params):
-        answer = requests.get(url, params=params)
-        return json.loads(answer.text)
-
     print('gconnect ...')
     state1 = request.args.get('state')
     if state1 != login_session['state']:
@@ -74,8 +76,9 @@ def gconnect():
         return _mk_response('Failed to upgrade the authorization code', 401)
 
     print('tokeninfo ...')
+    access_token = credentials.access_token
     result = _url_get('https://www.googleapis.com/oauth2/v1/tokeninfo',
-                       access_token=credentials.access_token)
+                      access_token=access_token)
 
     error = result.get('error')
     print2('tokeninfo OK, error: %s', error)
@@ -93,24 +96,43 @@ def gconnect():
     if stored_gplus_id and gplus_id == stored_gplus_id:
         return _mk_response('Current user is already connected', 200)
     #login_session['credentials'] = credentials
-    login_session['gplus_id'] = gplus_id
 
     print('userinfo ...')
     data = _url_get('https://www.googleapis.com/oauth2/v1/userinfo',
-                    access_token=credentials.access_token)
+                    access_token=access_token)
 
+    login_session['access_token'] = access_token
+    login_session['gplus_id'] = gplus_id
     login_session['username'] = data['name']
-    login_session['picture'] = data['picture']
     login_session['email'] = data['email']
+    login_session['picture'] = data['picture']
     print2('email: %s', data['email'])
 
     output = '''\
 <h2>Welcome, %s!</h2>
 <img src="%s" style="width: 300px; height: 300px; border-radius: 150px;"/>
 ''' % (login_session['username'], login_session['picture'])
+    flash('you are now logged in as %s' % login_session['username'])
     print('gconnect: before return ...')
     return _mk_response(output, 200)
 
+
+@app.route('/gdisconnect')
+def gdisconnect():
+    access_token = login_session.get('access_token')
+    if access_token is None:
+        return _mk_response('Current user not connected', 401)
+    result = _url_get('https://accounts.google.com/o/oauth2/revoke',
+                      token=access_token)
+    if result['status'] == '200':
+        del login_session['access_token']
+        del login_session['gplus_id']
+        del login_session['username']
+        del login_session['email']
+        del login_session['picture']
+        return _mk_response('Successfully disconnected', 200)
+    else:
+        return _mk_response('Failed to revoke token for given user', 400)
 
 
 #JSON APIs to view Restaurant Information
