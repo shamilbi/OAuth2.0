@@ -11,5 +11,5 @@
     * [MarkupSafe](https://pypi.python.org/pypi/MarkupSafe)
     * [oauth2client](https://pypi.python.org/pypi/oauth2client)
     * [requests](https://pypi.python.org/pypi/requests)
-* run: python3 project.py
+* run: `python3 project.py`
 * in a browser: [http://localhost:5000](http://localhost:5000)
