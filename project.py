@@ -180,7 +180,7 @@ def gdisconnect():
         return _mk_response('Failed to revoke token for given user', 400)
 
 
-def userLoggedIn():    
+def userLoggedIn():
     return 'access_token' in login_session
 
 
@@ -229,12 +229,19 @@ def newRestaurant():
   else:
       return render_template('newRestaurant.html')
 
+def validUser(restaurant):
+    rUser = restaurant.user_id
+    return rUser and rUser == login_session.get('user_id')
+
+
 #Edit a restaurant
 @app.route('/restaurant/<int:restaurant_id>/edit/', methods=['GET', 'POST'])
 def editRestaurant(restaurant_id):
   if not userLoggedIn():
       return redirect('/login')
   editedRestaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
+  if not validUser(editedRestaurant):
+      return redirect(url_for('showRestaurants'))
   if request.method == 'POST':
       if request.form['name']:
           editedRestaurant.name = request.form['name']
@@ -250,6 +257,8 @@ def deleteRestaurant(restaurant_id):
   if not userLoggedIn():
     return redirect('/login')
   restaurantToDelete = session.query(Restaurant).filter_by(id=restaurant_id).one()
+  if not validUser(restaurantToDelete):
+      return redirect(url_for('showRestaurants'))
   if request.method == 'POST':
     session.delete(restaurantToDelete)
     flash('%s Successfully Deleted' % restaurantToDelete.name)
@@ -280,6 +289,8 @@ def newMenuItem(restaurant_id):
     if not userLoggedIn():
         return redirect('/login')
     restaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
+    if not validUser(restaurant):
+        return redirect(url_for('showMenu', restaurant_id=restaurant_id))
     if request.method == 'POST':
         newItem = MenuItem(name=request.form['name'],
                            description=request.form['description'],
@@ -302,6 +313,8 @@ def editMenuItem(restaurant_id, menu_id):
 
     editedItem = session.query(MenuItem).filter_by(id=menu_id).one()
     restaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
+    if not validUser(restaurant):
+        return redirect(url_for('showMenu', restaurant_id=restaurant_id))
     if request.method == 'POST':
         if request.form['name']:
             editedItem.name = request.form['name']
@@ -327,6 +340,8 @@ def deleteMenuItem(restaurant_id, menu_id):
     if not userLoggedIn():
         return redirect('/login')
     restaurant = session.query(Restaurant).filter_by(id=restaurant_id).one()
+    if not validUser(restaurant):
+        return redirect(url_for('showMenu', restaurant_id=restaurant_id))
     itemToDelete = session.query(MenuItem).filter_by(id=menu_id).one()
     if request.method == 'POST':
         session.delete(itemToDelete)
