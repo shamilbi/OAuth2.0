@@ -2,4 +2,4 @@
 *.pyc
 *.db
 login.html
-client_secrets.json
+*_secrets.json
