@@ -1,5 +1,4 @@
 *.tmp
 *.pyc
 *.db
-login.html
 *_secrets.json

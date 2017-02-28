@@ -45,14 +45,27 @@ def getUser(id_):
 
 app = Flask(__name__)
 
-CLIENT_SECRETS = 'client_secrets.json'
+# Google
+G_CLIENT_SECRETS = 'g_client_secrets.json'
 
-def _load_client_id():
-    with open(CLIENT_SECRETS, 'r') as fp:
+def _g_load_client_id():
+    with open(G_CLIENT_SECRETS, 'r') as fp:
         return json.loads(fp.read())['web']['client_id']
 
-CLIENT_ID = _load_client_id()
-del _load_client_id
+G_CLIENT_ID = _g_load_client_id()
+del _g_load_client_id
+
+# Facebook
+FB_CLIENT_SECRETS = 'fb_client_secrets.json'
+
+
+def _fb_load_app_id():
+    with open(FB_CLIENT_SECRETS, 'r') as fp:
+        d = json.loads(fp.read())['web']
+        return d['app_id'], d['app_secret'], d['app_version']
+
+FB_APP_ID, FB_APP_SECRET, FB_APP_VERSION = _fb_load_app_id()
+del _fb_load_app_id
 
 #Connect to Database and create database session
 engine = create_engine('sqlite:///restaurantmenu.db')
@@ -68,7 +81,8 @@ def showLogin():
     login_session['state'] = state
     #return 'The current session state is %s' % state
     print('render login.html ...')
-    return render_template('login.html')
+    return render_template('login.html', g_client_id=G_CLIENT_ID,
+                           fb_app_id=FB_APP_ID, fb_app_version=FB_APP_VERSION)
 
 
 def print2(s, *args):
@@ -104,7 +118,7 @@ def gconnect():
     print('oauth flow ...')
     code = request.data
     try:
-        oauth_flow = flow_from_clientsecrets(CLIENT_SECRETS, scope='')
+        oauth_flow = flow_from_clientsecrets(G_CLIENT_SECRETS, scope='')
         oauth_flow.redirect_uri = 'postmessage'
         credentials = oauth_flow.step2_exchange(code)
     except FlowExchangeError:
@@ -123,7 +137,7 @@ def gconnect():
     print2('gplus_id: %s', gplus_id)
     if result['user_id'] != gplus_id:
         return _mk_response('Bad user_id', 401)
-    if result['issued_to'] != CLIENT_ID:
+    if result['issued_to'] != G_CLIENT_ID:
         return _mk_response('Bad issued_to', 401)
     access_token2 = login_session.get('access_token')
     if access_token2 and access_token2 == access_token:
@@ -133,6 +147,7 @@ def gconnect():
     data = _url_get('https://www.googleapis.com/oauth2/v1/userinfo',
                     access_token=access_token)
 
+    login_session['provider'] = 'google'
     login_session['access_token'] = access_token
     login_session['gplus_id'] = gplus_id
     login_session['username'] = data['name']
@@ -157,13 +172,41 @@ def gconnect():
     return _mk_response(output, 200)
 
 
+@app.route('/fbconnect', methods=['POST', ])
+def fbconnect():
+    state1 = request.args.get('state')
+    if state1 != login_session['state']:
+        print2('bad state: %s ...', state1)
+        return _mk_response('Invalid state parameter', 401)
+    access_token = request.data
+    print('fb connect ...')
+    result = _url_get0('https://graph.facebook.com/oauth/access_token',
+                       grant_type='fb_exchange_token',
+                       client_id=FB_APP_ID,
+                       client_secret=FB_APP_SECRET,
+                       fb_exchange_token=access_token)
+    print2('fb result: %s', result.text)
+    token = result.text.split('&')[0]
+
+    print('fb connect 2 ...')
+    data = _url_get('https://graph.facebook.com/v2.8/me?%s' % token)
+
+    login_session['provider'] = 'facebook'
+    login_session['facebook_id'] = data['id']
+    login_session['access_token'] = access_token
+    login_session['username'] = data['name']
+    login_session['email'] = data['email']
+
+LOGIN_KEYS = (
+    'access_token', 'provider', 'gplus_id', 'facebook_id',
+    'username', 'email', 'picture',
+    'user_id')
+
+
 def clear_session():
-    del login_session['access_token']
-    del login_session['gplus_id']
-    del login_session['username']
-    del login_session['email']
-    del login_session['picture']
-    del login_session['user_id']
+    for i in LOGIN_KEYS:
+        if i in login_session:
+            del login_session[i]
 
 
 @app.route('/gdisconnect')
